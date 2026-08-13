@@ -45,8 +45,8 @@ dsh web
 ## 结构
 
 ```
-lib/index.js    宿主半：session/event + llm/stream 账本 + sessionCost Remote 服务
-lib/client.js   客户端半（预构建 web bundle）：composer 读数 + 设置页
+lib/index.js    宿主侧：session/event + llm/stream 账本 + sessionCost Remote 服务
+lib/client.js   客户端侧（预构建 web bundle）：composer 读数 + 设置页
 ```
 
 - 宿主插件通过 `sessionCost` Remote 服务（`@deepseek-ai/dsh-typert-protocol` 的
