@@ -24,6 +24,7 @@ window.__ModuleLoader__.load({
         self: 'This session',
         subagent: 'Subagent',
         offline: 'not loaded',
+        ended: 'ended',
         unpriced: 'unpriced',
         breakdown: 'Breakdown',
         expand: 'Show the cost breakdown',
@@ -39,6 +40,7 @@ window.__ModuleLoader__.load({
         self: '本会话',
         subagent: '子代理',
         offline: '未加载',
+        ended: '已结束',
         unpriced: '未计价',
         breakdown: '费用明细',
         expand: '展开费用明细',
@@ -107,11 +109,11 @@ window.__ModuleLoader__.load({
     const NOTE = { color: 'var(--dsw-alias-label-tertiary)', fontSize: '11px', marginTop: '4px' }
 
     /** One row of the tree; `depth` drives the indentation. */
-    function row(key, depth, label, node, t, offlineMark) {
+    function row(key, depth, label, node, t, statusMark) {
       const meta = fmtCny(node.costCny) + ' · ' + node.calls + ' ' + t('calls')
         + ' · ' + fmtTokens(node.tokensIn) + ' ' + t('input') + ' / ' + fmtTokens(node.tokensOut) + ' ' + t('output')
         + (node.unpricedCalls > 0 ? ' · ' + node.unpricedCalls + ' ' + t('unpriced') : '')
-        + (offlineMark ? ' · ' + t('offline') : '')
+        + (statusMark === '' ? '' : ' · ' + statusMark)
       return h('div', { key, style: { ...ROW, paddingLeft: depth * 12 + 'px' } },
         h('span', { style: ROW_LABEL, title: node.childId ?? '' }, label),
         h('span', { style: ROW_META }, meta),
@@ -123,7 +125,8 @@ window.__ModuleLoader__.load({
       for (let index = 0; index < children.length; index += 1) {
         const child = children[index]
         const label = child.label !== '' ? child.label : (t('subagent') + ' ' + String(index + 1))
-        rows.push(row('c:' + child.childId + ':' + depth, depth, label, child, t, !child.live))
+        const mark = child.known === true ? (child.live ? '' : t('ended')) : t('offline')
+        rows.push(row('c:' + child.childId + ':' + depth, depth, label, child, t, mark))
         childRows(Array.isArray(child.children) ? child.children : [], depth + 1, rows, t)
       }
       return rows
@@ -179,7 +182,7 @@ window.__ModuleLoader__.load({
           const children = Array.isArray(value.familyChildren) ? value.familyChildren : []
           const rows = childRows(children, 1, [], t)
           const unpriced = Number(family.unpricedCalls) || 0
-          const offline = Number(family.offlineChildren) || 0
+          const unknown = Number(family.unknownChildren) || 0
           const text = fmtCny(family.costCny)
             + ' · ' + family.calls + ' ' + t('calls')
             + (children.length > 0 ? ' · ' + t('subagent') + ' ' + children.length : '')
@@ -207,12 +210,12 @@ window.__ModuleLoader__.load({
                 tokensOut: value.outputTokens,
                 unpricedCalls: value.unpricedCalls,
                 childId: undefined,
-              }, t, false),
+              }, t, ''),
               h('div', { style: DIVIDER }),
               ...(rows.length === 0 ? [h('div', { key: 'none', style: PANEL_TITLE }, '—')] : rows),
               h('div', { style: NOTE },
                 t('peak') + ' ' + fmtCny(value.costPeak) + ' · ' + t('offPeak') + ' ' + fmtCny(value.costOffPeak)
-                + (offline > 0 ? ' · ' + offline + ' ' + t('offline') : '')),
+                + (unknown > 0 ? ' · ' + unknown + ' ' + t('offline') : '')),
             ) : null,
           )
         }

@@ -131,22 +131,45 @@ function priceUsage(provider, model, usage, era, peak) {
   }
 }
 
-/** Client view of this session's direct children and their own subtrees. */
-function familyOf(state, ctx, depth, seen) {
+/** Uniform figures for a live projection state or a remembered snapshot. */
+function figures(state) {
+  return {
+    costCny: count(state.costCny),
+    calls: count(state.calls),
+    unpricedCalls: count(state.unpricedCalls),
+    input: count(state.input),
+    cacheRead: count(state.cacheRead),
+    cacheWrite: count(state.cacheWrite),
+    output: count(state.output),
+  }
+}
+
+/**
+ * Client view of this session's direct children and their own subtrees.
+ * A child that has left the in-memory store (a finished one-shot subagent) is
+ * read from the plugin's own last-known snapshot, so its cost does not vanish
+ * the moment it ends; only a child never observed as live stays unknown.
+ */
+function familyOf(state, ctx, known, depth, seen) {
   const children = []
   if (depth >= MAX_DEPTH || state.children === undefined) return children
   for (const child of state.children) {
     if (seen.has(child.childId)) continue
     seen.add(child.childId)
     const session = ctx.sessions.get(child.childId)
-    const childState = session === undefined ? undefined : ctx.sessionProjections.stateOf(session, 'sessionCost')
-    const grandchildren = childState === undefined ? [] : familyOf(childState, ctx, depth + 1, seen)
-    const own = childState === undefined ? ZERO : childState
+    const liveState = session === undefined ? undefined : ctx.sessionProjections.stateOf(session, 'sessionCost')
+    const live = liveState !== undefined
+    const remembered = liveState === undefined ? known.get(child.childId) : undefined
+    const figuresOf = liveState !== undefined ? figures(liveState) : (remembered === undefined ? undefined : figures(remembered))
+    const grandchildren = liveState === undefined ? [] : familyOf(liveState, ctx, known, depth + 1, seen)
+    const own = figuresOf ?? { costCny: 0, calls: 0, unpricedCalls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
     children.push({
       childId: child.childId,
       label: child.label,
       mode: child.mode,
-      live: childState !== undefined,
+      live,
+      known: figuresOf !== undefined,
+      ended: !live && figuresOf !== undefined,
       costCny: own.costCny,
       calls: own.calls,
       unpricedCalls: own.unpricedCalls,
@@ -165,7 +188,8 @@ function sumFamily(own, children) {
   let tokensIn = own.input + own.cacheRead + own.cacheWrite
   let tokensOut = own.output
   let unpricedCalls = own.unpricedCalls
-  let offlineChildren = 0
+  let unknownChildren = 0
+  let endedChildren = 0
   const walk = (nodes) => {
     for (const node of nodes) {
       costCny += node.costCny
@@ -173,15 +197,35 @@ function sumFamily(own, children) {
       tokensIn += node.tokensIn
       tokensOut += node.tokensOut
       unpricedCalls += node.unpricedCalls
-      if (!node.live) offlineChildren += 1
+      if (!node.known) unknownChildren += 1
+      else if (node.ended) endedChildren += 1
       walk(node.children)
     }
   }
   walk(children)
-  return { costCny, calls, tokensIn, tokensOut, unpricedCalls, offlineChildren }
+  return { costCny, calls, tokensIn, tokensOut, unpricedCalls, unknownChildren, endedChildren }
 }
 
 export function apply(ctx) {
+  /**
+   * Last-known figures of child sessions, keyed by child session id. Updated
+   * from every child session's events, so a child's cost survives the moment
+   * the child leaves the in-memory store. It is process-local: after a restart
+   * only a child that is live again can be recounted.
+   */
+  const known = new Map()
+
+  ctx.on('session/event', (session) => {
+    try {
+      if (session.header === undefined || session.header.parentSession === undefined) return
+      const state = ctx.sessionProjections.stateOf(session, 'sessionCost')
+      if (state === undefined) return
+      known.set(session.id, figures(state))
+    } catch (error) {
+      console.error('[session-cost] family snapshot failed:', error)
+    }
+  })
+
   ctx.sessionProjections.register({
     key: 'sessionCost',
     stateSchema: ANY_JSON,
@@ -241,7 +285,7 @@ export function apply(ctx) {
     wire: {
       viewSchema: ANY_JSON,
       view(state) {
-        const children = familyOf(state, ctx, 0, new Set())
+        const children = familyOf(state, ctx, known, 0, new Set())
         const family = sumFamily(state, children)
         const costByEra = {}
         for (const id of Object.keys(state.costByEra)) costByEra[id] = state.costByEra[id]
