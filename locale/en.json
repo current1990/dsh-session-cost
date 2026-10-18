@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Cost",
+    "description": "Shows the estimated model cost of the open session below the composer, using DeepSeek peak / off-peak CNY pricing."
+  }
+}
