@@ -12,8 +12,8 @@ window.__ModuleLoader__.load({
 
     /** Visible text goes through the Client locale service. */
     const DICT = {
-      en: { title: 'Session cost', input: 'in', output: 'out', calls: 'calls', peak: 'peak hours' },
-      zh: { title: '会话费用', input: '输入', output: '输出', calls: '次调用', peak: '高峰时段' },
+      en: { title: 'Session cost', input: 'in', output: 'out', calls: 'calls', peak: 'Peak', offPeak: 'Off-peak' },
+      zh: { title: '会话费用', input: '输入', output: '输出', calls: '次调用', peak: '高峰', offPeak: '空闲' },
     }
 
     function fmtCny(value) {
@@ -40,7 +40,6 @@ window.__ModuleLoader__.load({
       whiteSpace: 'nowrap',
     }
     const VALUE = { color: 'var(--dsw-alias-label-primary)' }
-    const SEP = { opacity: 0.6 }
 
     return {
       inject: ['slots', 'locale'],
@@ -48,22 +47,31 @@ window.__ModuleLoader__.load({
         ctx.effect(() => ctx.locale.register(NS, DICT), 'session-cost: locale dictionaries')
         const t = ctx.locale.bind(NS)
 
+        /** Multiline tooltip: peak/off-peak split and per-price-era totals. */
+        function breakdown(value) {
+          const lines = [t('title') + (value.model === '' ? '' : ' · ' + value.model)]
+          const peak = Number(value.costPeak) || 0
+          const offPeak = Number(value.costOffPeak) || 0
+          lines.push(t('peak') + ' ' + fmtCny(peak) + ' · ' + t('offPeak') + ' ' + fmtCny(offPeak))
+          const byEra = value.costByEra !== null && typeof value.costByEra === 'object' ? value.costByEra : {}
+          const eras = Object.keys(byEra)
+          if (eras.length > 1) {
+            lines.push(eras.map((id) => id + ' ' + fmtCny(Number(byEra[id]) || 0)).join(' · '))
+          }
+          return lines.join('\n')
+        }
+
         function CostReadout(props) {
           const value = props.useProjection('sessionCost')
           if (value === undefined || value === null || value.calls === 0) return null
           const inputTokens = value.inputTokens + value.cacheReadTokens + value.cacheWriteTokens
-          const details = []
-          details.push(fmtCny(value.costCny))
-          details.push(' · ')
-          details.push(fmtTokens(inputTokens) + ' ' + t('input') + ' / ' + fmtTokens(value.outputTokens) + ' ' + t('output'))
-          details.push(' · ')
-          details.push(String(value.calls) + ' ' + t('calls'))
-          return h('div', {
-            style: LINE,
-            title: t('title') + (value.model === '' ? '' : ' · ' + value.model),
-          },
+          const text = fmtCny(value.costCny)
+            + ' · ' + fmtTokens(inputTokens) + ' ' + t('input')
+            + ' / ' + fmtTokens(value.outputTokens) + ' ' + t('output')
+            + ' · ' + value.calls + ' ' + t('calls')
+          return h('div', { style: LINE, title: breakdown(value) },
             h('span', null, t('title')),
-            h('span', { style: VALUE }, details.join('')),
+            h('span', { style: VALUE }, text),
           )
         }
 
