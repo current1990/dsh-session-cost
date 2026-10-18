@@ -275,8 +275,18 @@ export function apply(ctx) {
    * writes a fresh row. A child that neither path can price stays "not loaded".
    */
   const warm = async (warmCtx, signal) => {
-    const persistence = warmCtx.sessionPersistence
-    const cache = warmCtx.sessionProjectionCache
+    // The nested plugin's `inject` normally guarantees both services, but this
+    // short retry keeps the warm-up working even if activation raced ahead of
+    // the storage registries.
+    let persistence = warmCtx.get('sessionPersistence')
+    let cache = warmCtx.get('sessionProjectionCache')
+    for (let attempt = 0; attempt < 40 && (persistence === undefined || cache === undefined); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      if (signal.aborted) return
+      persistence = warmCtx.get('sessionPersistence')
+      cache = warmCtx.get('sessionProjectionCache')
+    }
+    if (persistence === undefined || cache === undefined) return
     const snapshots = await persistence.list({ signal })
     let coldReads = 0
     for (const snapshot of snapshots) {
