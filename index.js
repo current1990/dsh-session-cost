@@ -274,10 +274,9 @@ export function apply(ctx) {
    * so those children fall back to one cold log read that refolds them and
    * writes a fresh row. A child that neither path can price stays "not loaded".
    */
-  const warm = async (signal) => {
-    const persistence = ctx.get('sessionPersistence')
-    const cache = ctx.get('sessionProjectionCache')
-    if (persistence === undefined || cache === undefined) return
+  const warm = async (warmCtx, signal) => {
+    const persistence = warmCtx.sessionPersistence
+    const cache = warmCtx.sessionProjectionCache
     const snapshots = await persistence.list({ signal })
     let coldReads = 0
     for (const snapshot of snapshots) {
@@ -301,13 +300,19 @@ export function apply(ctx) {
     }
   }
 
-  ctx.effect(() => {
-    const controller = new AbortController()
-    warm(controller.signal).catch((error) => {
-      if (!controller.signal.aborted) console.error('[session-cost] family warm-up failed:', error)
-    })
-    return () => controller.abort()
-  }, 'session-cost: warm family snapshots')
+  // A nested plugin: activation waits for the storage services, so the warm-up
+  // never runs against a half-built context the way a bare ctx.get() would.
+  ctx.plugin({
+    name: 'session-cost-family-warm',
+    inject: ['sessionPersistence', 'sessionProjectionCache'],
+    apply(warmCtx) {
+      const controller = new AbortController()
+      warm(warmCtx, controller.signal).catch((error) => {
+        if (!controller.signal.aborted) console.error('[session-cost] family warm-up failed:', error)
+      })
+      return () => controller.abort()
+    },
+  })
 
   ctx.sessionProjections.register({
     key: 'sessionCost',
