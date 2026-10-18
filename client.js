@@ -29,17 +29,22 @@ window.__ModuleLoader__.load({
       return (value / 1e6).toFixed(2) + 'M'
     }
 
+    // Matches the shipped dock readout (ContextMeter.trigger) that renders in the
+    // same row: same size token, line box, tertiary label color, padding and gap.
     const LINE = {
-      display: 'flex',
+      display: 'inline-flex',
       alignItems: 'center',
       gap: '6px',
-      fontSize: '11px',
-      lineHeight: '1.4',
-      color: 'var(--dsw-alias-label-secondary)',
+      flex: 'none',
+      fontFamily: 'inherit',
+      fontSize: 'var(--dsh-content-font-size-secondary, 13px)',
+      lineHeight: 'calc(20px + var(--dsh-content-font-delta-secondary, 0px))',
+      color: 'var(--dsw-alias-label-tertiary)',
       fontVariantNumeric: 'tabular-nums',
       whiteSpace: 'nowrap',
+      padding: '1px 8px',
     }
-    const VALUE = { color: 'var(--dsw-alias-label-primary)' }
+    const VALUE = { color: 'var(--dsw-alias-label-secondary)' }
 
     return {
       inject: ['slots', 'locale'],
