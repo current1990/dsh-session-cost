@@ -94,7 +94,28 @@ window.__ModuleLoader__.load({
     }
     const LINE_OPEN = { background: 'var(--dsw-alias-interactive-bg-hover)', color: 'var(--dsw-alias-label-secondary)' }
     const VALUE = { color: 'var(--dsw-alias-label-secondary)' }
-    const CARET = { fontSize: '10px', opacity: 0.7 }
+    /** Host-style chevron: crisp at any size, rotates when its group is open. */
+    function caretIcon(open, size) {
+      return h('svg', {
+        width: size,
+        height: size,
+        viewBox: '0 0 16 16',
+        'aria-hidden': true,
+        style: {
+          flex: 'none',
+          opacity: 0.85,
+          transform: open ? 'rotate(90deg)' : 'none',
+          transition: 'transform 120ms ease',
+        },
+      }, h('path', {
+        d: 'M6 3.5L10.5 8L6 12.5',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.8,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+      }))
+    }
     const PANEL = {
       position: 'absolute',
       left: 0,
@@ -121,7 +142,7 @@ window.__ModuleLoader__.load({
     const NOTE = { color: 'var(--dsw-alias-label-tertiary)', fontSize: '11px', marginTop: '4px' }
     const GROUP = {
       display: 'flex',
-      alignItems: 'baseline',
+      alignItems: 'center',
       gap: '6px',
       width: '100%',
       padding: '1px 0',
@@ -231,7 +252,7 @@ window.__ModuleLoader__.load({
                 title: childrenOpen ? t('collapseChildren') : t('expandChildren'),
                 onClick: () => setChildrenOpen(!childrenOpen),
               },
-                h('span', { style: CARET, 'aria-hidden': true }, childrenOpen ? '▾' : '▸'),
+                caretIcon(childrenOpen, 13),
                 h('span', { style: ROW_LABEL }, t('subagents') + ' ' + descriptors.length),
                 h('span', { style: ROW_META }, fmtCny(childrenCost > 0 ? childrenCost : 0)),
               ),
@@ -256,7 +277,7 @@ window.__ModuleLoader__.load({
             },
               h('span', null, t('title')),
               h('span', { style: VALUE }, text),
-              h('span', { style: CARET, 'aria-hidden': true }, open ? '▾' : '▸'),
+              caretIcon(open, 14),
             ),
             open ? h('div', { style: PANEL, role: 'dialog' },
               h('div', { style: PANEL_TITLE }, t('breakdown')),
