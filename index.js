@@ -210,8 +210,8 @@ export function apply(ctx) {
   /**
    * Last-known figures of child sessions, keyed by child session id. Updated
    * from every child session's events, so a child's cost survives the moment
-   * the child leaves the in-memory store. It is process-local: after a restart
-   * only a child that is live again can be recounted.
+   * the child leaves the in-memory store; seeded at startup from the persisted
+   * projection cache, so a restart still counts children that already ended.
    */
   const known = new Map()
 
@@ -225,6 +225,49 @@ export function apply(ctx) {
       console.error('[session-cost] family snapshot failed:', error)
     }
   })
+
+  /**
+   * Seed `known` from the persisted projection cache: every stored child
+   * session already has our `sessionCost` row (the cache checkpoints on session
+   * creation, `turn/end`, and disposal), and `cachedSnapshot` reads it with no
+   * log I/O. A child without a usable row stays "not loaded".
+   */
+  const warm = async (signal) => {
+    const persistence = ctx.get('sessionPersistence')
+    const cache = ctx.get('sessionProjectionCache')
+    if (persistence === undefined || cache === undefined) return
+    const snapshots = await persistence.list({ signal })
+    for (const snapshot of snapshots) {
+      if (signal.aborted) return
+      const header = snapshot.header
+      if (header === undefined || header.parentSession === undefined) continue
+      if (known.has(header.id)) continue
+      try {
+        const cached = cache.cachedSnapshot(header, ['sessionCost'])
+        const value = cached !== undefined && cached.values !== undefined ? cached.values.sessionCost : undefined
+        if (value === undefined || value === null) continue
+        known.set(header.id, figures({
+          costCny: value.costCny,
+          calls: value.calls,
+          unpricedCalls: value.unpricedCalls,
+          input: value.inputTokens,
+          cacheRead: value.cacheReadTokens,
+          cacheWrite: value.cacheWriteTokens,
+          output: value.outputTokens,
+        }))
+      } catch (error) {
+        // A malformed or version-mismatched row simply stays unknown.
+      }
+    }
+  }
+
+  ctx.effect(() => {
+    const controller = new AbortController()
+    warm(controller.signal).catch((error) => {
+      if (!controller.signal.aborted) console.error('[session-cost] family warm-up failed:', error)
+    })
+    return () => controller.abort()
+  }, 'session-cost: warm family snapshots')
 
   ctx.sessionProjections.register({
     key: 'sessionCost',

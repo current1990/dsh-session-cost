@@ -125,6 +125,7 @@
 - **§3.4 未计价语义**：采纳默认 `unpriced` —— token 照常累计、金额不累加，`unpricedCalls` / `unpricedTokensIn` / `unpricedTokensOut` 进入 `wire.view`，读数显示"未计价"。
 - **§2 方案 C（宿主侧持久子树索引）**：暂不排期；如需要"重启后仍包含已结束子会话"的整族金额，再评估读取持久化的方案。
 - **补充（0.3.1）**：进程内为子会话维护"最后已知费用"快照（每次子会话事件时更新），使一次性子代理结束后合计不会立刻变小；快照是进程内存，重启后失效。
+- **补充（0.3.2）**：该快照在启动时从**投影缓存**预热——`sessionPersistence.list()` 取 header，`sessionProjectionCache.cachedSnapshot(header, ['sessionCost'])` 零 I/O 读取已存子会话金额。因此重启后仍能计入已结束的子会话；只有缓存中无可用行时才保持"未加载"。不新增任何插件自有存储。
 - **§3.3（首调用缺 route）**：随 `provider` 加入状态一并处理——缺 route 时 provider 为空串，自然落入未计价分支，不再静默按 flash 估算。
 
 未决：§5 的读数文案（当前用"未计价"角标）、汇率与多币种（暂不涉及）。
