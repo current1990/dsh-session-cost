@@ -131,6 +131,46 @@ function priceUsage(provider, model, usage, era, peak) {
   }
 }
 
+/** Cap the startup cold refolds; boot must stay cheap. */
+const MAX_COLD_READS = 200
+
+/** Convert one wire-view value into the same figures shape used for live state. */
+function toFigures(value) {
+  return figures({
+    costCny: value.costCny,
+    calls: value.calls,
+    unpricedCalls: value.unpricedCalls,
+    input: value.inputTokens,
+    cacheRead: value.cacheReadTokens,
+    cacheWrite: value.cacheWriteTokens,
+    output: value.outputTokens,
+  })
+}
+
+/** Zero-I/O cached read; undefined for a missing or version-mismatched row. */
+function readCached(cache, header) {
+  try {
+    const cached = cache.cachedSnapshot(header, ['sessionCost'])
+    const value = cached !== undefined && cached.values !== undefined ? cached.values.sessionCost : undefined
+    return value === undefined || value === null ? undefined : toFigures(value)
+  } catch (error) {
+    return undefined
+  }
+}
+
+/** Cold read: fold the child's stored log once, which also writes a fresh row. */
+async function readCold(persistence, cache, header, signal) {
+  const handle = await persistence.open(header.id, 'read', { signal })
+  try {
+    const result = await handle.read(undefined, undefined, { signal })
+    const snapshot = cache.coldSnapshot(handle.header, handle.inheritedEventCount, result.events)
+    const value = snapshot.values !== undefined ? snapshot.values.sessionCost : undefined
+    return value === undefined || value === null ? undefined : toFigures(value)
+  } finally {
+    await handle.close()
+  }
+}
+
 /** Uniform figures for a live projection state or a remembered snapshot. */
 function figures(state) {
   return {
@@ -230,33 +270,33 @@ export function apply(ctx) {
    * Seed `known` from the persisted projection cache: every stored child
    * session already has our `sessionCost` row (the cache checkpoints on session
    * creation, `turn/end`, and disposal), and `cachedSnapshot` reads it with no
-   * log I/O. A child without a usable row stays "not loaded".
+   * log I/O. A row written by an older `stateVersion` is refused by the cache,
+   * so those children fall back to one cold log read that refolds them and
+   * writes a fresh row. A child that neither path can price stays "not loaded".
    */
   const warm = async (signal) => {
     const persistence = ctx.get('sessionPersistence')
     const cache = ctx.get('sessionProjectionCache')
     if (persistence === undefined || cache === undefined) return
     const snapshots = await persistence.list({ signal })
+    let coldReads = 0
     for (const snapshot of snapshots) {
       if (signal.aborted) return
       const header = snapshot.header
       if (header === undefined || header.parentSession === undefined) continue
       if (known.has(header.id)) continue
+      const cached = readCached(cache, header)
+      if (cached !== undefined) {
+        known.set(header.id, cached)
+        continue
+      }
+      if (coldReads >= MAX_COLD_READS) continue
+      coldReads += 1
       try {
-        const cached = cache.cachedSnapshot(header, ['sessionCost'])
-        const value = cached !== undefined && cached.values !== undefined ? cached.values.sessionCost : undefined
-        if (value === undefined || value === null) continue
-        known.set(header.id, figures({
-          costCny: value.costCny,
-          calls: value.calls,
-          unpricedCalls: value.unpricedCalls,
-          input: value.inputTokens,
-          cacheRead: value.cacheReadTokens,
-          cacheWrite: value.cacheWriteTokens,
-          output: value.outputTokens,
-        }))
+        const recollected = await readCold(persistence, cache, header, signal)
+        if (recollected !== undefined) known.set(header.id, recollected)
       } catch (error) {
-        // A malformed or version-mismatched row simply stays unknown.
+        if (!signal.aborted) console.error('[session-cost] family cold read failed:', error)
       }
     }
   }
