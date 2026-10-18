@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-cost",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "license": "MIT",
   "description": "Real-time session cost meter for the DeepSeek Harness: estimated CNY model cost below the composer.",
@@ -20,7 +20,9 @@
     "icon.svg"
   ],
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true,
