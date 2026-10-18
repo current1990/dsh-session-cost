@@ -68,6 +68,14 @@ icon.svg          插件图标
 - 针对 DSH Desktop `0.2.1-rc.x` 编写（投影 `wire.view`、`useProjection`、slot 注册契约）。
 - 不依赖任何 npm 包：bundle 自带宿主与客户端代码，安装时无需构建。
 
+## 已知限制
+
+- **子代理不计入本会话**：子代理是独立会话（`origin: "subagent"`），有自己的日志与费用；父会话读数不聚合它们。打开子会话可看到它自己的费用。
+- **按 model 计价、未区分渠道**：同一 model 在不同 provider 的价格差异目前无法表达；未命中价格表的模型按 flash 价静默估算。
+- **会话内切换模型**是按调用时点计价的（不会串价），但上述两种边界情况仍在。
+
+以上问题的分析与候选方案见 [docs/RFC-0001-billing-edge-cases.md](./docs/RFC-0001-billing-edge-cases.md)。
+
 ## License
 
 MIT
