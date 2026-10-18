@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-cost",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "license": "MIT",
   "description": "Real-time session cost meter for the DeepSeek Harness: estimated CNY model cost below the composer.",

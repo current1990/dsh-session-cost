@@ -4,13 +4,17 @@
 // `sessionCost` projection (`wire.view`), pushed to the browser by the
 // framework; this module only renders it. The line shows the whole session
 // family (this session plus its subagent sessions); clicking it opens a small
-// panel with the per-session tree.
+// panel with the per-session tree, whose subagent group is collapsed until
+// the user expands it.
 window.__ModuleLoader__.load({
   id: 'dsh-session-cost',
   factory(require) {
     const React = require('react')
     const h = React.createElement
     const NS = 'session-cost'
+
+    /** At most this many subagent rows are listed before the "…" summary. */
+    const MAX_VISIBLE_CHILDREN = 10
 
     /** Visible text goes through the Client locale service. */
     const DICT = {
@@ -23,12 +27,16 @@ window.__ModuleLoader__.load({
         offPeak: 'Off-peak',
         self: 'This session',
         subagent: 'Subagent',
+        subagents: 'Subagents',
+        more: 'more',
         offline: 'not loaded',
         ended: 'ended',
         unpriced: 'unpriced',
         breakdown: 'Breakdown',
         expand: 'Show the cost breakdown',
         collapse: 'Hide the cost breakdown',
+        expandChildren: 'Show the subagent breakdown',
+        collapseChildren: 'Hide the subagent breakdown',
       },
       zh: {
         title: '会话费用',
@@ -39,12 +47,16 @@ window.__ModuleLoader__.load({
         offPeak: '空闲',
         self: '本会话',
         subagent: '子代理',
+        subagents: '子代理',
+        more: '还有',
         offline: '未加载',
         ended: '已结束',
         unpriced: '未计价',
         breakdown: '费用明细',
         expand: '展开费用明细',
         collapse: '收起费用明细',
+        expandChildren: '展开子代理明细',
+        collapseChildren: '收起子代理明细',
       },
     }
 
@@ -107,9 +119,25 @@ window.__ModuleLoader__.load({
     const ROW_META = { flex: 'none', color: 'var(--dsw-alias-label-tertiary)' }
     const DIVIDER = { height: '1px', margin: '6px 0', background: 'var(--dsw-alias-border-l1)' }
     const NOTE = { color: 'var(--dsw-alias-label-tertiary)', fontSize: '11px', marginTop: '4px' }
+    const GROUP = {
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: '6px',
+      width: '100%',
+      padding: '1px 0',
+      margin: '0',
+      background: 'transparent',
+      border: 'none',
+      borderRadius: 'var(--dsw-radius-sm)',
+      color: 'var(--dsw-alias-label-secondary)',
+      font: 'inherit',
+      textAlign: 'left',
+      cursor: 'pointer',
+    }
+    const MORE_ROW = { color: 'var(--dsw-alias-label-tertiary)', paddingLeft: '12px' }
 
-    /** One row of the tree; `depth` drives the indentation. */
-    function row(key, depth, label, node, t, statusMark) {
+    /** One rendered row; `depth` drives the indentation. */
+    function rowElement(key, depth, label, node, t, statusMark) {
       const meta = fmtCny(node.costCny) + ' · ' + node.calls + ' ' + t('calls')
         + ' · ' + fmtTokens(node.tokensIn) + ' ' + t('input') + ' / ' + fmtTokens(node.tokensOut) + ' ' + t('output')
         + (node.unpricedCalls > 0 ? ' · ' + node.unpricedCalls + ' ' + t('unpriced') : '')
@@ -120,16 +148,16 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** Flatten the child tree into rows; depth starts at 1 under the root row. */
-    function childRows(children, depth, rows, t) {
+    /** Flatten the child tree into plain descriptors (no elements, so it can be capped). */
+    function flattenChildren(children, depth, out, t) {
       for (let index = 0; index < children.length; index += 1) {
         const child = children[index]
         const label = child.label !== '' ? child.label : (t('subagent') + ' ' + String(index + 1))
         const mark = child.known === true ? (child.live ? '' : t('ended')) : t('offline')
-        rows.push(row('c:' + child.childId + ':' + depth, depth, label, child, t, mark))
-        childRows(Array.isArray(child.children) ? child.children : [], depth + 1, rows, t)
+        out.push({ key: 'c:' + child.childId + ':' + depth, depth, label, node: child, mark })
+        flattenChildren(Array.isArray(child.children) ? child.children : [], depth + 1, out, t)
       }
-      return rows
+      return out
     }
 
     return {
@@ -155,6 +183,7 @@ window.__ModuleLoader__.load({
         function CostReadout(props) {
           const value = props.useProjection('sessionCost')
           const [open, setOpen] = React.useState(false)
+          const [childrenOpen, setChildrenOpen] = React.useState(false)
           const rootRef = React.useRef(null)
 
           React.useEffect(() => {
@@ -176,17 +205,45 @@ window.__ModuleLoader__.load({
           if (value === undefined || value === null) return null
           const family = value.family !== null && typeof value.family === 'object'
             ? value.family
-            : { costCny: value.costCny, calls: value.calls, tokensIn: value.inputTokens + value.cacheReadTokens + value.cacheWriteTokens, tokensOut: value.outputTokens, unpricedCalls: value.unpricedCalls, offlineChildren: 0 }
+            : { costCny: value.costCny, calls: value.calls, tokensIn: value.inputTokens + value.cacheReadTokens + value.cacheWriteTokens, tokensOut: value.outputTokens, unpricedCalls: value.unpricedCalls, unknownChildren: 0 }
           if (family.calls === 0 && family.costCny === 0) return null
 
           const children = Array.isArray(value.familyChildren) ? value.familyChildren : []
-          const rows = childRows(children, 1, [], t)
+          const descriptors = flattenChildren(children, 1, [], t)
+          const visible = descriptors.slice(0, MAX_VISIBLE_CHILDREN)
+          const hidden = descriptors.length - visible.length
+          const childrenCost = Number(family.costCny) - Number(value.costCny)
           const unpriced = Number(family.unpricedCalls) || 0
           const unknown = Number(family.unknownChildren) || 0
           const text = fmtCny(family.costCny)
             + ' · ' + family.calls + ' ' + t('calls')
             + (children.length > 0 ? ' · ' + t('subagent') + ' ' + children.length : '')
             + (unpriced > 0 ? ' · ' + unpriced + ' ' + t('unpriced') : '')
+
+          const childrenSection = descriptors.length === 0
+            ? null
+            : [
+              h('button', {
+                key: 'group',
+                type: 'button',
+                style: GROUP,
+                'aria-expanded': childrenOpen,
+                title: childrenOpen ? t('collapseChildren') : t('expandChildren'),
+                onClick: () => setChildrenOpen(!childrenOpen),
+              },
+                h('span', { style: CARET, 'aria-hidden': true }, childrenOpen ? '▾' : '▸'),
+                h('span', { style: ROW_LABEL }, t('subagents') + ' ' + descriptors.length),
+                h('span', { style: ROW_META }, fmtCny(childrenCost > 0 ? childrenCost : 0)),
+              ),
+              childrenOpen
+                ? h('div', { key: 'rows' },
+                  visible.map((item) => rowElement(item.key, item.depth, item.label, item.node, t, item.mark)),
+                  hidden > 0
+                    ? h('div', { key: 'more', style: MORE_ROW }, '… ' + t('more') + ' ' + hidden)
+                    : null,
+                )
+                : null,
+            ]
 
           return h('div', { ref: rootRef, style: ROOT },
             h('button', {
@@ -203,7 +260,7 @@ window.__ModuleLoader__.load({
             ),
             open ? h('div', { style: PANEL, role: 'dialog' },
               h('div', { style: PANEL_TITLE }, t('breakdown')),
-              row('self', 0, t('self'), {
+              rowElement('self', 0, t('self'), {
                 costCny: value.costCny,
                 calls: value.calls,
                 tokensIn: value.inputTokens + value.cacheReadTokens + value.cacheWriteTokens,
@@ -211,8 +268,7 @@ window.__ModuleLoader__.load({
                 unpricedCalls: value.unpricedCalls,
                 childId: undefined,
               }, t, ''),
-              h('div', { style: DIVIDER }),
-              ...(rows.length === 0 ? [h('div', { key: 'none', style: PANEL_TITLE }, '—')] : rows),
+              childrenSection,
               h('div', { style: NOTE },
                 t('peak') + ' ' + fmtCny(value.costPeak) + ' · ' + t('offPeak') + ' ' + fmtCny(value.costOffPeak)
                 + (unknown > 0 ? ' · ' + unknown + ' ' + t('offline') : '')),
